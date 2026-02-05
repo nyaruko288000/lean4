@@ -4,18 +4,20 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        default: 'v4.15.0'
+        default: 'v4.27.0'
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Install host Lean4
+      - name: Install host Lean4 via elan
         run: |
-          curl -sSL https://github.com/leanprover/lean4/releases/download/${{ inputs.version }}/lean-${{ inputs.version }}-linux.tar.zst \
-            | tar --zstd -xf - -C /tmp
-          sudo mv /tmp/lean-${{ inputs.version }}-linux /opt/lean-host
-          echo "/opt/lean-host/bin" >> $GITHUB_PATH
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain leanprover/lean4:${{ inputs.version }}
+          echo "$HOME/.elan/bin" >> $GITHUB_PATH
+          
+      - name: Verify host lean
+        run: lean --version
 
       - name: Install Zig 0.15.2
         run: |
@@ -87,7 +89,7 @@ jobs:
             -DCMAKE_CXX_COMPILER=$HOME/.local/bin/aarch64-linux-musl-clang++ \
             -DCMAKE_AR=$HOME/.local/bin/zig-ar \
             -DCMAKE_RANLIB=$HOME/.local/bin/zig-ranlib \
-            -DLEAN_STAGE0=/opt/lean-host \
+            -DLEAN_STAGE0=$HOME/.elan/toolchains/leanprover--lean4---${{ inputs.version }} \
             -DCMAKE_C_FLAGS="$CFLAGS" \
             -DCMAKE_CXX_FLAGS="$CFLAGS" \
             -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS" \
