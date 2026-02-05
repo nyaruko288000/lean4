@@ -1,4 +1,4 @@
-name: Lean4 Cross (ThinLTO)
+name: Lean4 Cross (ThinLTO + Zig 0.15.2)
 
 on:
   workflow_dispatch:
@@ -10,40 +10,51 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Install deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build zig
-
-      - name: Install host Lean4
+      - name: Install host Lean4 via elan
         run: |
           curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
             | sh -s -- -y --default-toolchain leanprover/lean4:${{ inputs.version }}
           echo "$HOME/.elan/bin" >> $GITHUB_PATH
+          
+      - name: Verify host lean
+        run: lean --version
 
-      - name: Verify
+      - name: Install Zig 0.15.2
         run: |
-          lean --version
-          zig version
+          wget -q https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz
+          tar xf zig-x86_64-linux-0.15.2.tar.xz
+          sudo mv zig-x86_64-linux-0.15.2 /opt/zig
+          echo "/opt/zig" >> $GITHUB_PATH
 
       - name: Setup Zig CC wrappers
         run: |
           mkdir -p ~/.local/bin
           
-          echo '#!/bin/sh
-          exec zig cc -target aarch64-linux-musl "$@"' > ~/.local/bin/zcc
+          cat > ~/.local/bin/aarch64-linux-musl-clang << 'EOF'
+          #!/bin/sh
+          exec zig cc -target aarch64-linux-musl "$@"
+          EOF
           
-          echo '#!/bin/sh
-          exec zig c++ -target aarch64-linux-musl "$@"' > ~/.local/bin/zxx
+          cat > ~/.local/bin/aarch64-linux-musl-clang++ << 'EOF'
+          #!/bin/sh
+          exec zig c++ -target aarch64-linux-musl "$@"
+          EOF
           
-          echo '#!/bin/sh
-          exec zig ar "$@"' > ~/.local/bin/zar
+          cat > ~/.local/bin/zig-ar << 'EOF'
+          #!/bin/sh
+          exec zig ar "$@"
+          EOF
           
-          echo '#!/bin/sh
-          exec zig ranlib "$@"' > ~/.local/bin/zranlib
+          cat > ~/.local/bin/zig-ranlib << 'EOF'
+          #!/bin/sh
+          exec zig ranlib "$@"
+          EOF
           
           chmod +x ~/.local/bin/*
           echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
 
       - name: Clone Lean4
         run: |
@@ -55,17 +66,29 @@ jobs:
         run: |
           mkdir build && cd build
           
-          CFLAGS="-march=armv8.5-a+crypto+sha3+sm4 -O3 -flto=thin -ffunction-sections -fdata-sections"
-          LDFLAGS="-static -flto=thin -Wl,--gc-sections -Wl,--icf=safe -Wl,-O2 -Wl,--strip-all"
+          CFLAGS="-march=armv8.5-a+crypto+sha3+sm4+i8mm+bf16 \
+                  -mtune=cortex-a78 \
+                  -O3 \
+                  -flto=thin \
+                  -ffunction-sections \
+                  -fdata-sections \
+                  -fno-semantic-interposition"
+          
+          LDFLAGS="-static \
+                   -flto=thin \
+                   -Wl,--gc-sections \
+                   -Wl,--icf=safe \
+                   -Wl,-O2 \
+                   -Wl,--strip-all"
           
           cmake .. -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_SYSTEM_NAME=Linux \
             -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
-            -DCMAKE_C_COMPILER=$HOME/.local/bin/zcc \
-            -DCMAKE_CXX_COMPILER=$HOME/.local/bin/zxx \
-            -DCMAKE_AR=$HOME/.local/bin/zar \
-            -DCMAKE_RANLIB=$HOME/.local/bin/zranlib \
+            -DCMAKE_C_COMPILER=$HOME/.local/bin/aarch64-linux-musl-clang \
+            -DCMAKE_CXX_COMPILER=$HOME/.local/bin/aarch64-linux-musl-clang++ \
+            -DCMAKE_AR=$HOME/.local/bin/zig-ar \
+            -DCMAKE_RANLIB=$HOME/.local/bin/zig-ranlib \
             -DLEAN_STAGE0=$HOME/.elan/toolchains/leanprover--lean4---${{ inputs.version }} \
             -DCMAKE_C_FLAGS="$CFLAGS" \
             -DCMAKE_CXX_FLAGS="$CFLAGS" \
@@ -82,9 +105,9 @@ jobs:
           DESTDIR=$PWD/out ninja install
           cd out/usr/local
           file bin/lean
-          tar --zstd -cf $GITHUB_WORKSPACE/lean4-aarch64-musl.tar.zst .
+          tar --zstd -cf $GITHUB_WORKSPACE/lean4-aarch64-musl-thinlto.tar.zst .
 
       - uses: actions/upload-artifact@v4
         with:
-          name: lean4-aarch64-musl
-          path: lean4-aarch64-musl.tar.zst
+          name: lean4-aarch64-musl-thinlto
+          path: lean4-aarch64-musl-thinlto.tar.zst
