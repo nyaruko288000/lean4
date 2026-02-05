@@ -15,48 +15,47 @@ jobs:
       WRAPPER_DIR: /opt/cc-wrapper
       
     steps:
-      - name: Install host Lean4 via elan
+      - name: Install host Lean4
         run: |
-          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
-            | sh -s -- -y --default-toolchain leanprover/lean4:${{ inputs.version }}
-          
-          # 复制到固定位置避免路径问题
-          cp -r $HOME/.elan/toolchains/leanprover--lean4---${{ inputs.version }} ${{ env.LEAN_HOST_DIR }}
+          VERSION="${{ inputs.version }}"
+          curl -sSL "https://github.com/leanprover/lean4/releases/download/${VERSION}/lean-${VERSION#v}-linux-x86_64.zip" -o lean.zip
+          unzip -q lean.zip -d /tmp
+          sudo mv /tmp/lean-${VERSION#v}-linux-x86_64 /opt/lean-host
           
       - name: Verify host lean
-        run: ${{ env.LEAN_HOST_DIR }}/bin/lean --version
+        run: /opt/lean-host/bin/lean --version
 
       - name: Install Zig 0.15.2
         run: |
           wget -q https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz
           tar xf zig-x86_64-linux-0.15.2.tar.xz
-          sudo mv zig-x86_64-linux-0.15.2 ${{ env.ZIG_DIR }}
+          sudo mv zig-x86_64-linux-0.15.2 /opt/zig
 
       - name: Setup Zig CC wrappers
         run: |
-          sudo mkdir -p ${{ env.WRAPPER_DIR }}
+          sudo mkdir -p /opt/cc-wrapper
           
-          sudo tee ${{ env.WRAPPER_DIR }}/aarch64-linux-musl-clang << 'EOF'
+          sudo tee /opt/cc-wrapper/aarch64-linux-musl-clang << 'EOF'
           #!/bin/sh
           exec /opt/zig/zig cc -target aarch64-linux-musl "$@"
           EOF
           
-          sudo tee ${{ env.WRAPPER_DIR }}/aarch64-linux-musl-clang++ << 'EOF'
+          sudo tee /opt/cc-wrapper/aarch64-linux-musl-clang++ << 'EOF'
           #!/bin/sh
           exec /opt/zig/zig c++ -target aarch64-linux-musl "$@"
           EOF
           
-          sudo tee ${{ env.WRAPPER_DIR }}/zig-ar << 'EOF'
+          sudo tee /opt/cc-wrapper/zig-ar << 'EOF'
           #!/bin/sh
           exec /opt/zig/zig ar "$@"
           EOF
           
-          sudo tee ${{ env.WRAPPER_DIR }}/zig-ranlib << 'EOF'
+          sudo tee /opt/cc-wrapper/zig-ranlib << 'EOF'
           #!/bin/sh
           exec /opt/zig/zig ranlib "$@"
           EOF
           
-          sudo chmod +x ${{ env.WRAPPER_DIR }}/*
+          sudo chmod +x /opt/cc-wrapper/*
 
       - name: Install build tools
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
@@ -75,11 +74,11 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_SYSTEM_NAME=Linux \
             -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
-            -DCMAKE_C_COMPILER=${{ env.WRAPPER_DIR }}/aarch64-linux-musl-clang \
-            -DCMAKE_CXX_COMPILER=${{ env.WRAPPER_DIR }}/aarch64-linux-musl-clang++ \
-            -DCMAKE_AR=${{ env.WRAPPER_DIR }}/zig-ar \
-            -DCMAKE_RANLIB=${{ env.WRAPPER_DIR }}/zig-ranlib \
-            -DLEAN_STAGE0=${{ env.LEAN_HOST_DIR }} \
+            -DCMAKE_C_COMPILER=/opt/cc-wrapper/aarch64-linux-musl-clang \
+            -DCMAKE_CXX_COMPILER=/opt/cc-wrapper/aarch64-linux-musl-clang++ \
+            -DCMAKE_AR=/opt/cc-wrapper/zig-ar \
+            -DCMAKE_RANLIB=/opt/cc-wrapper/zig-ranlib \
+            -DLEAN_STAGE0=/opt/lean-host \
             -DCMAKE_C_FLAGS="-march=armv8.5-a+crypto+sha3+sm4+i8mm+bf16 -mtune=cortex_a78 -O3 -flto=thin -ffunction-sections -fdata-sections -fno-semantic-interposition" \
             -DCMAKE_CXX_FLAGS="-march=armv8.5-a+crypto+sha3+sm4+i8mm+bf16 -mtune=cortex_a78 -O3 -flto=thin -ffunction-sections -fdata-sections -fno-semantic-interposition" \
             -DCMAKE_EXE_LINKER_FLAGS="-static -flto=thin -Wl,--gc-sections -Wl,-O2 -Wl,-s" \
