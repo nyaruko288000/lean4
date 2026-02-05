@@ -9,49 +9,54 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      ZIG_DIR: /opt/zig
+      LEAN_HOST_DIR: /opt/lean-host
+      WRAPPER_DIR: /opt/cc-wrapper
+      
     steps:
       - name: Install host Lean4 via elan
         run: |
           curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
             | sh -s -- -y --default-toolchain leanprover/lean4:${{ inputs.version }}
-          echo "$HOME/.elan/bin" >> $GITHUB_PATH
+          
+          # 复制到固定位置避免路径问题
+          cp -r $HOME/.elan/toolchains/leanprover--lean4---${{ inputs.version }} ${{ env.LEAN_HOST_DIR }}
           
       - name: Verify host lean
-        run: lean --version
+        run: ${{ env.LEAN_HOST_DIR }}/bin/lean --version
 
       - name: Install Zig 0.15.2
         run: |
           wget -q https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz
           tar xf zig-x86_64-linux-0.15.2.tar.xz
-          sudo mv zig-x86_64-linux-0.15.2 /opt/zig
-          echo "/opt/zig" >> $GITHUB_PATH
+          sudo mv zig-x86_64-linux-0.15.2 ${{ env.ZIG_DIR }}
 
       - name: Setup Zig CC wrappers
         run: |
-          mkdir -p ~/.local/bin
+          sudo mkdir -p ${{ env.WRAPPER_DIR }}
           
-          cat > ~/.local/bin/aarch64-linux-musl-clang << 'EOF'
+          sudo tee ${{ env.WRAPPER_DIR }}/aarch64-linux-musl-clang << 'EOF'
           #!/bin/sh
-          exec zig cc -target aarch64-linux-musl "$@"
+          exec /opt/zig/zig cc -target aarch64-linux-musl "$@"
           EOF
           
-          cat > ~/.local/bin/aarch64-linux-musl-clang++ << 'EOF'
+          sudo tee ${{ env.WRAPPER_DIR }}/aarch64-linux-musl-clang++ << 'EOF'
           #!/bin/sh
-          exec zig c++ -target aarch64-linux-musl "$@"
+          exec /opt/zig/zig c++ -target aarch64-linux-musl "$@"
           EOF
           
-          cat > ~/.local/bin/zig-ar << 'EOF'
+          sudo tee ${{ env.WRAPPER_DIR }}/zig-ar << 'EOF'
           #!/bin/sh
-          exec zig ar "$@"
+          exec /opt/zig/zig ar "$@"
           EOF
           
-          cat > ~/.local/bin/zig-ranlib << 'EOF'
+          sudo tee ${{ env.WRAPPER_DIR }}/zig-ranlib << 'EOF'
           #!/bin/sh
-          exec zig ranlib "$@"
+          exec /opt/zig/zig ranlib "$@"
           EOF
           
-          chmod +x ~/.local/bin/*
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          sudo chmod +x ${{ env.WRAPPER_DIR }}/*
 
       - name: Install build tools
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
@@ -66,32 +71,18 @@ jobs:
         run: |
           mkdir build && cd build
           
-          CFLAGS="-march=armv8.5-a+crypto+sha3+sm4+i8mm+bf16 \
-                  -mtune=cortex_a78 \
-                  -O3 \
-                  -flto=thin \
-                  -ffunction-sections \
-                  -fdata-sections \
-                  -fno-semantic-interposition"
-          
-          LDFLAGS="-static \
-                   -flto=thin \
-                   -Wl,--gc-sections \
-                   -Wl,-s \
-                   -Wl,-O2"
-          
           cmake .. -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_SYSTEM_NAME=Linux \
             -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
-            -DCMAKE_C_COMPILER=$HOME/.local/bin/aarch64-linux-musl-clang \
-            -DCMAKE_CXX_COMPILER=$HOME/.local/bin/aarch64-linux-musl-clang++ \
-            -DCMAKE_AR=$HOME/.local/bin/zig-ar \
-            -DCMAKE_RANLIB=$HOME/.local/bin/zig-ranlib \
-            -DLEAN_STAGE0=$HOME/.elan/toolchains/leanprover--lean4---${{ inputs.version }} \
-            -DCMAKE_C_FLAGS="$CFLAGS" \
-            -DCMAKE_CXX_FLAGS="$CFLAGS" \
-            -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS" \
+            -DCMAKE_C_COMPILER=${{ env.WRAPPER_DIR }}/aarch64-linux-musl-clang \
+            -DCMAKE_CXX_COMPILER=${{ env.WRAPPER_DIR }}/aarch64-linux-musl-clang++ \
+            -DCMAKE_AR=${{ env.WRAPPER_DIR }}/zig-ar \
+            -DCMAKE_RANLIB=${{ env.WRAPPER_DIR }}/zig-ranlib \
+            -DLEAN_STAGE0=${{ env.LEAN_HOST_DIR }} \
+            -DCMAKE_C_FLAGS="-march=armv8.5-a+crypto+sha3+sm4+i8mm+bf16 -mtune=cortex_a78 -O3 -flto=thin -ffunction-sections -fdata-sections -fno-semantic-interposition" \
+            -DCMAKE_CXX_FLAGS="-march=armv8.5-a+crypto+sha3+sm4+i8mm+bf16 -mtune=cortex_a78 -O3 -flto=thin -ffunction-sections -fdata-sections -fno-semantic-interposition" \
+            -DCMAKE_EXE_LINKER_FLAGS="-static -flto=thin -Wl,--gc-sections -Wl,-O2 -Wl,-s" \
             -DLEAN_STATIC=ON
 
       - name: Build
