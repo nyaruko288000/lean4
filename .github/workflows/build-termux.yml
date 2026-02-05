@@ -77,9 +77,8 @@ jobs:
           LDFLAGS="-static \
                    -flto=thin \
                    -Wl,--gc-sections \
-                   -Wl,--icf=safe \
-                   -Wl,-O2 \
-                   -Wl,--strip-all"
+                   -Wl,-s \
+                   -Wl,-O2 \"
           
           cmake .. -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
