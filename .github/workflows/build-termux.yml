@@ -9,18 +9,14 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      ZIG_DIR: /opt/zig
-      LEAN_HOST_DIR: /opt/lean-host
-      WRAPPER_DIR: /opt/cc-wrapper
       
     steps:
       - name: Install host Lean4
         run: |
           VERSION="${{ inputs.version }}"
-          curl -sSL "https://github.com/leanprover/lean4/releases/download/${VERSION}/lean-${VERSION#v}-linux-x86_64.zip" -o lean.zip
-          unzip -q lean.zip -d /tmp
-          sudo mv /tmp/lean-${VERSION#v}-linux-x86_64 /opt/lean-host
+          curl -sSL "https://releases.lean-lang.org/lean4/${VERSION}/lean-${VERSION#v}-linux.tar.zst" \
+            | tar --zstd -xf - -C /tmp
+          sudo mv /tmp/lean-${VERSION#v}-linux /opt/lean-host
           
       - name: Verify host lean
         run: /opt/lean-host/bin/lean --version
