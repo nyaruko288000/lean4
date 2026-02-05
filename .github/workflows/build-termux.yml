@@ -53,8 +53,47 @@ jobs:
           
           sudo chmod +x /opt/cc-wrapper/*
 
+      - name: Build libuv for aarch64-musl
+        run: |
+          git clone --depth 1 --branch v1.48.0 https://github.com/libuv/libuv.git
+          cd libuv
+          mkdir build && cd build
+          
+          cmake .. \
+            -DCMAKE_SYSTEM_NAME=Linux \
+            -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+            -DCMAKE_C_COMPILER=/opt/cc-wrapper/aarch64-linux-musl-clang \
+            -DCMAKE_AR=/opt/cc-wrapper/zig-ar \
+            -DCMAKE_RANLIB=/opt/cc-wrapper/zig-ranlib \
+            -DCMAKE_C_FLAGS="-march=armv8.5-a -O3 -flto=thin" \
+            -DCMAKE_INSTALL_PREFIX=/opt/sysroot \
+            -DBUILD_TESTING=OFF \
+            -DLIBUV_BUILD_SHARED=OFF
+          
+          make -j$(nproc)
+          sudo make install
+
+      - name: Build GMP for aarch64-musl
+        run: |
+          wget -q https://gmplib.org/download/gmp/gmp-6.3.0.tar.xz
+          tar xf gmp-6.3.0.tar.xz
+          cd gmp-6.3.0
+          
+          CC=/opt/cc-wrapper/aarch64-linux-musl-clang \
+          AR=/opt/cc-wrapper/zig-ar \
+          RANLIB=/opt/cc-wrapper/zig-ranlib \
+          CFLAGS="-march=armv8.5-a -O3 -flto=thin" \
+          ./configure \
+            --host=aarch64-linux-musl \
+            --prefix=/opt/sysroot \
+            --enable-static \
+            --disable-shared
+          
+          make -j$(nproc)
+          sudo make install
+
       - name: Install build tools
-        run: sudo apt-get update && sudo apt-get install -y cmake build-essential
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential pkg-config
 
       - name: Clone Lean4
         run: |
@@ -70,20 +109,36 @@ jobs:
           set(CMAKE_CXX_COMPILER /opt/cc-wrapper/aarch64-linux-musl-clang++)
           set(CMAKE_AR /opt/cc-wrapper/zig-ar)
           set(CMAKE_RANLIB /opt/cc-wrapper/zig-ranlib)
+          
+          set(CMAKE_FIND_ROOT_PATH /opt/sysroot)
+          set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+          set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+          set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+          set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+          
           set(CMAKE_C_FLAGS_INIT "-march=armv8.5-a+crypto+sha3+sm4+i8mm+bf16 -mtune=cortex_a78 -O3 -flto=thin -ffunction-sections -fdata-sections")
           set(CMAKE_CXX_FLAGS_INIT "-march=armv8.5-a+crypto+sha3+sm4+i8mm+bf16 -mtune=cortex_a78 -O3 -flto=thin -ffunction-sections -fdata-sections")
           set(CMAKE_EXE_LINKER_FLAGS_INIT "-static -flto=thin -Wl,--gc-sections -Wl,-O2 -Wl,-s")
+          
+          set(ENV{PKG_CONFIG_PATH} "/opt/sysroot/lib/pkgconfig")
+          set(ENV{PKG_CONFIG_LIBDIR} "/opt/sysroot/lib/pkgconfig")
           EOF
 
       - name: Configure
         working-directory: lean4
         run: |
           mkdir build && cd build
+          
+          export PKG_CONFIG_PATH=/opt/sysroot/lib/pkgconfig
+          export PKG_CONFIG_LIBDIR=/opt/sysroot/lib/pkgconfig
+          
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE=/tmp/toolchain.cmake \
             -DLEAN_STAGE0=/opt/lean-host \
-            -DLEAN_STATIC=ON
+            -DLEAN_STATIC=ON \
+            -DGMP_INCLUDE_DIR=/opt/sysroot/include \
+            -DGMP_LIBRARIES=/opt/sysroot/lib/libgmp.a
 
       - name: Build
         working-directory: lean4/build
